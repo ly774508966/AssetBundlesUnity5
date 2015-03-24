@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using System;
 using System.Collections;
 #if UNITY_EDITOR	
 using UnityEditor;
@@ -101,22 +102,24 @@ public class BaseLoader : MonoBehaviour {
 		}
 	}
 
-	protected IEnumerator Load (string assetBundleName, string assetName)
+	protected IEnumerator Load( string assetBundleName, string assetName, Action<UnityEngine.Object> callback )
 	{
 		Debug.Log("Start to load " + assetName + " at frame " + Time.frameCount);
 
 		// Load asset from assetBundle.
-		AssetBundleLoadAssetOperation request = AssetBundleManager.LoadAssetAsync(assetBundleName, assetName, typeof(GameObject) );
+		AssetBundleLoadAssetOperation request = AssetBundleManager.LoadAssetAsync(assetBundleName, assetName, typeof(UnityEngine.Object) );
 		if (request == null)
 			yield break;
 		yield return StartCoroutine(request);
 
 		// Get the asset.
-		GameObject prefab = request.GetAsset<GameObject> ();
+		UnityEngine.Object prefab = request.GetAsset<UnityEngine.Object>();
 		Debug.Log(assetName + (prefab == null ? " isn't" : " is")+ " loaded successfully at frame " + Time.frameCount );
 
-		if (prefab != null)
-			GameObject.Instantiate(prefab);
+		if (prefab != null && callback != null)
+		{
+			callback( prefab );
+		}
 	}
 
 	protected IEnumerator LoadLevel (string assetBundleName, string levelName, bool isAdditive)
