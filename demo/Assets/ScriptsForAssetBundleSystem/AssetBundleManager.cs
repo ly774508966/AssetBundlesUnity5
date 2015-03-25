@@ -24,11 +24,13 @@ public class LoadedAssetBundle
 {
 	public AssetBundle m_AssetBundle;
 	public int m_ReferencedCount;
-	
-	public LoadedAssetBundle(AssetBundle assetBundle)
+	public WWW m_WWW;
+
+	public LoadedAssetBundle(WWW www)
 	{
-		m_AssetBundle = assetBundle;
+		m_AssetBundle = null;
 		m_ReferencedCount = 1;
+		m_WWW = www;
 	}
 }
 
@@ -44,7 +46,6 @@ public class AssetBundleManager : MonoBehaviour
 #endif
 
 	static Dictionary<string, LoadedAssetBundle> m_LoadedAssetBundles = new Dictionary<string, LoadedAssetBundle> ();
-	static Dictionary<string, WWW> m_DownloadingWWWs = new Dictionary<string, WWW> ();
 	static Dictionary<string, string> m_DownloadingErrors = new Dictionary<string, string> ();
 	static List<AssetBundleLoadOperation> m_InProgressOperations = new List<AssetBundleLoadOperation> ();
 	static Dictionary<string, string[]> m_Dependencies = new Dictionary<string, string[]> ();
@@ -100,7 +101,7 @@ public class AssetBundleManager : MonoBehaviour
 	
 		LoadedAssetBundle bundle = null;
 		m_LoadedAssetBundles.TryGetValue(assetBundleName, out bundle);
-		if (bundle == null)
+		if (bundle == null || bundle.m_AssetBundle == null)
 			return null;
 		
 		// No dependencies are recorded, only the bundle itself is required.
@@ -117,7 +118,7 @@ public class AssetBundleManager : MonoBehaviour
 			// Wait all the dependent assetBundles being loaded.
 			LoadedAssetBundle dependentBundle;
 			m_LoadedAssetBundles.TryGetValue(dependency, out dependentBundle);
-			if (dependentBundle == null)
+			if (dependentBundle == null || dependentBundle.m_AssetBundle == null)
 				return null;
 		}
 
@@ -205,14 +206,13 @@ public class AssetBundleManager : MonoBehaviour
 		if (bundle != null)
 		{
 			bundle.m_ReferencedCount++;
-			return true;
-		}
+			if ( bundle.m_AssetBundle != null )
+			{
+				return true;
+			}
 
-		// @TODO: Do we need to consider the referenced count of WWWs?
-		// In the demo, we never have duplicate WWWs as we wait LoadAssetAsync()/LoadLevelAsync() to be finished before calling another LoadAssetAsync()/LoadLevelAsync().
-		// But in the real case, users can call LoadAssetAsync()/LoadLevelAsync() several times then wait them to be finished which might have duplicate WWWs.
-		if (m_DownloadingWWWs.ContainsKey(assetBundleName) )
-			return true;
+			return false;
+		}
 
 		WWW download = null;
 		string url = m_BaseDownloadingURL + assetBundleName;
@@ -223,7 +223,7 @@ public class AssetBundleManager : MonoBehaviour
 		else
 			download = WWW.LoadFromCacheOrDownload(url, m_AssetBundleManifest.GetAssetBundleHash(assetBundleName), 0); 
 
-		m_DownloadingWWWs.Add(assetBundleName, download);
+		m_LoadedAssetBundles.Add( assetBundleName, new LoadedAssetBundle( download ) );
 
 		return false;
 	}
@@ -292,7 +292,10 @@ public class AssetBundleManager : MonoBehaviour
 
 		if (--bundle.m_ReferencedCount == 0)
 		{
-			bundle.m_AssetBundle.Unload(false);
+			if ( bundle.m_AssetBundle != null )
+			{
+				bundle.m_AssetBundle.Unload( false );
+			}
 			m_LoadedAssetBundles.Remove(assetBundleName);
 			//Debug.Log("AssetBundle " + assetBundleName + " has been unloaded successfully");
 		}
@@ -302,32 +305,37 @@ public class AssetBundleManager : MonoBehaviour
 	{
 		// Collect all the finished WWWs.
 		var keysToRemove = new List<string>();
-		foreach (var keyValue in m_DownloadingWWWs)
+		foreach (var keyValue in m_LoadedAssetBundles)
 		{
-			WWW download = keyValue.Value;
+			WWW download = keyValue.Value.m_WWW;
+
+			if (download == null)
+			{
+				continue;
+			}
 
 			// If downloading fails.
-			if (download.error != null)
+			if ( download.error != null )
 			{
-				m_DownloadingErrors.Add(keyValue.Key, download.error);
-				keysToRemove.Add(keyValue.Key);
+				m_DownloadingErrors.Add( keyValue.Key, download.error );
+				keysToRemove.Add( keyValue.Key );
 				continue;
 			}
 
 			// If downloading succeeds.
-			if(download.isDone)
+			if ( download.isDone )
 			{
 				//Debug.Log("Downloading " + keyValue.Key + " is done at frame " + Time.frameCount);
-				m_LoadedAssetBundles.Add(keyValue.Key, new LoadedAssetBundle(download.assetBundle) );
-				keysToRemove.Add(keyValue.Key);
+				keyValue.Value.m_AssetBundle = download.assetBundle;
+				keysToRemove.Add( keyValue.Key );
 			}
 		}
 
 		// Remove the finished WWWs.
 		foreach( var key in keysToRemove)
 		{
-			WWW download = m_DownloadingWWWs[key];
-			m_DownloadingWWWs.Remove(key);
+			WWW download = m_LoadedAssetBundles[key].m_WWW;
+			m_LoadedAssetBundles[key].m_WWW = null;
 			download.Dispose();
 		}
 
